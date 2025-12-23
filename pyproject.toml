@@ -1,0 +1,25 @@
+[project]
+name = "press"
+version = "0.1.0"
+description = "Entropy-based LLM Math Problem Solving Analysis"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "vllm>=0.6.0",
+    "transformers>=4.40.0",
+    "datasets>=2.18.0",
+    "numpy>=1.26.0",
+    "pandas>=2.2.0",
+    "matplotlib>=3.8.0",
+    "seaborn>=0.13.0",
+    "tqdm>=4.66.0",
+    "torch>=2.0.0",
+    "math-verify>=0.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "ipython>=8.20.0",
+    "jupyter>=1.0.0",
+]
