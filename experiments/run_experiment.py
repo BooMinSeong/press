@@ -50,8 +50,9 @@ def run_experiment(
     model_name: str = MODEL_NAME,
     output_path: str = "results/experiment.json",
     num_problems: int = None,
+    num_samples: int = 1,
     temperature: float = 0.7,
-    max_tokens: int = 512,
+    max_tokens: int = 4096,
 ):
     """
     Run the full experiment with entropy tracking and multiple injection prompts.
@@ -60,6 +61,7 @@ def run_experiment(
         model_name: vLLM model name
         output_path: Path to save results
         num_problems: Number of problems to process (None = all)
+        num_samples: Number of trajectories to sample per problem
         temperature: Sampling temperature
         max_tokens: Maximum tokens per step
     """
@@ -67,6 +69,7 @@ def run_experiment(
     print("Entropy-based LLM Math Problem Solving Analysis")
     print("="*80)
     print(f"Model: {model_name}")
+    print(f"Samples per problem: {num_samples}")
     print(f"Temperature: {temperature}")
     print(f"Max tokens: {max_tokens}")
     print()
@@ -97,31 +100,51 @@ def run_experiment(
     all_results = []
 
     for idx, problem in enumerate(tqdm(dataset, desc="Solving problems")):
-        try:
-            # Solve with entropy tracking
-            result = solve_with_entropy_tracking(
-                llm,
-                problem,
-                SYSTEM_PROMPT,
-                sampling_params,
-            )
+        # Initialize problem result with multiple trajectories
+        problem_result = {
+            'problem_id': problem.get('id', problem.get('problem_id', f'problem_{idx}')),
+            'problem_text': problem['problem'],
+            'gold_answer': problem['answer'],
+            'trajectories': []
+        }
 
-            # Evaluate correctness
-            eval_data = {
-                'gold_answer': result['gold_answer'],
-                'final_answer': result['final_answer'],
-            }
-            result['is_correct'] = evaluate_result(eval_data)
+        # Generate multiple trajectories for this problem
+        for traj_id in range(num_samples):
+            try:
+                # Solve with entropy tracking
+                trajectory = solve_with_entropy_tracking(
+                    llm,
+                    problem,
+                    SYSTEM_PROMPT,
+                    sampling_params,
+                )
 
-            all_results.append(result)
+                # Add trajectory ID
+                trajectory['trajectory_id'] = traj_id
 
-            # Save incrementally every 10 problems
-            if (idx + 1) % 10 == 0:
-                save_results(all_results, output_path)
+                # Evaluate correctness
+                eval_data = {
+                    'gold_answer': trajectory['gold_answer'],
+                    'final_answer': trajectory['final_answer'],
+                }
+                trajectory['is_correct'] = evaluate_result(eval_data)
 
-        except Exception as e:
-            print(f"\nError processing problem {idx}: {e}")
-            continue
+                # Remove redundant fields (already in problem_result)
+                trajectory.pop('problem_id', None)
+                trajectory.pop('problem_text', None)
+                trajectory.pop('gold_answer', None)
+
+                problem_result['trajectories'].append(trajectory)
+
+            except Exception as e:
+                print(f"\nError processing problem {idx}, trajectory {traj_id}: {e}")
+                continue
+
+        all_results.append(problem_result)
+
+        # Save incrementally every 10 problems
+        if (idx + 1) % 10 == 0:
+            save_results(all_results, output_path)
 
     # Final save
     save_results(all_results, output_path)
@@ -131,18 +154,43 @@ def run_experiment(
     print("="*80)
     print("Experiment Summary")
     print("="*80)
-    total = len(all_results)
-    correct = sum(1 for r in all_results if r.get('is_correct', False))
-    accuracy = correct / total if total > 0 else 0
 
-    print(f"Total problems: {total}")
-    print(f"Correct: {correct}")
-    print(f"Accuracy: {accuracy:.2%}")
+    total_problems = len(all_results)
+    total_trajectories = sum(len(p['trajectories']) for p in all_results)
+
+    # Count correct trajectories
+    correct_trajectories = sum(
+        1 for p in all_results
+        for t in p['trajectories']
+        if t.get('is_correct', False)
+    )
+
+    # Calculate accuracy
+    accuracy = correct_trajectories / total_trajectories if total_trajectories > 0 else 0
+
+    # Count problems with at least one correct trajectory
+    problems_with_correct = sum(
+        1 for p in all_results
+        if any(t.get('is_correct', False) for t in p['trajectories'])
+    )
+    problem_accuracy = problems_with_correct / total_problems if total_problems > 0 else 0
+
+    print(f"Total problems: {total_problems}")
+    print(f"Total trajectories: {total_trajectories}")
+    print(f"Samples per problem: {num_samples}")
+    print()
+    print(f"Correct trajectories: {correct_trajectories}/{total_trajectories}")
+    print(f"Trajectory-level accuracy: {accuracy:.2%}")
+    print()
+    print(f"Problems with ≥1 correct trajectory: {problems_with_correct}/{total_problems}")
+    print(f"Problem-level accuracy (pass@{num_samples}): {problem_accuracy:.2%}")
     print()
 
-    # Average steps per problem
-    avg_steps = sum(len(r['steps']) for r in all_results) / total if total > 0 else 0
-    print(f"Average steps per problem: {avg_steps:.2f}")
+    # Average steps per trajectory
+    all_trajectories = [t for p in all_results for t in p['trajectories']]
+    if all_trajectories:
+        avg_steps = sum(len(t['steps']) for t in all_trajectories) / len(all_trajectories)
+        print(f"Average steps per trajectory: {avg_steps:.2f}")
 
     return all_results
 
@@ -170,6 +218,12 @@ def main():
         help="Number of problems to process (default: all)"
     )
     parser.add_argument(
+        "--num-samples",
+        type=int,
+        default=1,
+        help="Number of trajectories to sample per problem (default: 1)"
+    )
+    parser.add_argument(
         "--temperature",
         type=float,
         default=0.7,
@@ -188,6 +242,7 @@ def main():
         model_name=args.model,
         output_path=args.output,
         num_problems=args.num_problems,
+        num_samples=args.num_samples,
         temperature=args.temperature,
         max_tokens=args.max_tokens,
     )

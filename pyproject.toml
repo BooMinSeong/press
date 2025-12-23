@@ -23,3 +23,12 @@ dev = [
     "ipython>=8.20.0",
     "jupyter>=1.0.0",
 ]
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["press*"]
+exclude = ["experiments*", "results*"]

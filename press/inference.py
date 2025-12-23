@@ -6,9 +6,11 @@ import numpy as np
 from typing import Dict, List, Any, Optional
 from vllm import LLM
 
+from math_verify import parse
+
 from .config import INJECTION_PROMPTS, VERIFICATION_PARAMS, MAX_STEPS
-from .entropy import calculate_entropy, calculate_token_entropies, get_entropy_statistics
-from .verification import parse_boxed_answer, is_solution_finished
+from .entropy import calculate_entropy, calculate_token_entropies, get_entropy_statistics, _extract_logprob_value
+from .verification import is_solution_finished
 
 
 def solve_with_entropy_tracking(
@@ -101,7 +103,18 @@ def solve_with_entropy_tracking(
 
     # 6) Parse final answer
     results['generated_solution'] = generated_text.strip()
-    results['final_answer'] = parse_boxed_answer(generated_text)
+
+    # Parse returns [sympy_obj, str_fallback] or empty list on failure
+    if generated_text.strip():
+        result = parse(generated_text)
+        if isinstance(result, list) and len(result) >= 2:
+            results['final_answer'] = result[1]  # Return string fallback
+        elif isinstance(result, list) and len(result) == 1:
+            results['final_answer'] = str(result[0])  # Convert sympy to string
+        else:
+            results['final_answer'] = None
+    else:
+        results['final_answer'] = None
 
     return results
 
@@ -136,11 +149,19 @@ def apply_injection_prompt(
         first_token_logprobs = output.outputs[0].logprobs[0]
         injection_entropy = calculate_entropy(first_token_logprobs)
 
-        # Store top-k probabilities
-        top_k_probs = {
-            str(token_id): float(np.exp(logprob))
-            for token_id, logprob in first_token_logprobs.items()
-        }
+        # Store top-k probabilities with decoded tokens as keys
+        top_k_probs = {}
+        for token_id, logprob in first_token_logprobs.items():
+            # Extract decoded token text
+            if hasattr(logprob, 'decoded_token'):
+                token_text = logprob.decoded_token
+            else:
+                # Fallback to token_id if decoded_token not available
+                token_text = str(token_id)
+
+            prob = float(np.exp(_extract_logprob_value(logprob)))
+            top_k_probs[token_text] = prob
+
         # Normalize
         total_prob = sum(top_k_probs.values())
         top_k_probs = {k: v/total_prob for k, v in top_k_probs.items()}

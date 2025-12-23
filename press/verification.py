@@ -2,36 +2,7 @@
 Answer parsing and verification utilities using math_verify package.
 """
 
-import re
-from typing import Optional
 from math_verify import parse, verify
-
-
-def parse_boxed_answer(text: str) -> Optional[str]:
-    """
-    Extract answer from LaTeX \\boxed{...} notation.
-
-    Args:
-        text: Generated solution text
-
-    Returns:
-        Extracted answer string, or None if not found
-    """
-    # Look for \boxed{...}
-    pattern = r'\\boxed\{([^}]+)\}'
-    match = re.search(pattern, text)
-
-    if match:
-        return match.group(1).strip()
-
-    # Fallback: try to find "final answer is: X"
-    pattern2 = r'final answer is:?\s*\$?\\boxed\{([^}]+)\}'
-    match2 = re.search(pattern2, text, re.IGNORECASE)
-
-    if match2:
-        return match2.group(1).strip()
-
-    return None
 
 
 def evaluate_result(data: dict) -> bool:
@@ -45,11 +16,23 @@ def evaluate_result(data: dict) -> bool:
     Returns:
         True if correct, False otherwise
     """
-    gold_answer = data["gold_answer"]
-    gold_answer = parse("\\boxed{" + gold_answer + "}")
+    # Parse gold answer
+    gold_result = parse("\\boxed{" + data["gold_answer"] + "}")
+    if isinstance(gold_result, list) and len(gold_result) > 0:
+        gold_answer = gold_result[0]
+    else:
+        return False
 
+    # Parse prediction (final_answer is a string from inference.py)
     prediction = data["final_answer"]
-    prediction = parse(prediction) if prediction else None
+    if prediction:
+        pred_result = parse(prediction)
+        if isinstance(pred_result, list) and len(pred_result) > 0:
+            prediction = pred_result[0]
+        else:
+            return False
+    else:
+        return False
 
     return verify(gold_answer, prediction)
 

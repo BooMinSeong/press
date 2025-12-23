@@ -34,22 +34,45 @@ def basic_performance_analysis(results: List[Dict[str, Any]]) -> pd.DataFrame:
     Returns:
         DataFrame with performance statistics
     """
-    total = len(results)
-    correct = sum(1 for r in results if r.get('is_correct', False))
+    # Flatten trajectories from all problems
+    all_trajectories = []
+    for problem in results:
+        for traj in problem.get('trajectories', []):
+            all_trajectories.append({
+                'problem_id': problem['problem_id'],
+                'is_correct': traj.get('is_correct', False),
+                'steps': traj.get('steps', []),
+            })
+
+    total = len(all_trajectories)
+    if total == 0:
+        return pd.DataFrame({'Value': ['No trajectories found']}, index=['Error'])
+
+    correct = sum(1 for t in all_trajectories if t['is_correct'])
     accuracy = correct / total if total > 0 else 0
 
     # Calculate average steps
-    avg_steps = np.mean([len(r['steps']) for r in results])
+    avg_steps = np.mean([len(t['steps']) for t in all_trajectories])
 
     # Steps distribution for correct vs incorrect
-    correct_steps = [len(r['steps']) for r in results if r.get('is_correct', False)]
-    incorrect_steps = [len(r['steps']) for r in results if not r.get('is_correct', False)]
+    correct_steps = [len(t['steps']) for t in all_trajectories if t['is_correct']]
+    incorrect_steps = [len(t['steps']) for t in all_trajectories if not t['is_correct']]
+
+    # Count unique problems
+    unique_problems = len(results)
+    problems_with_correct = sum(
+        1 for p in results
+        if any(t.get('is_correct', False) for t in p.get('trajectories', []))
+    )
 
     stats = {
-        'Total Problems': total,
-        'Correct': correct,
-        'Incorrect': total - correct,
-        'Accuracy': f"{accuracy:.2%}",
+        'Total Problems': unique_problems,
+        'Total Trajectories': total,
+        'Correct Trajectories': correct,
+        'Incorrect Trajectories': total - correct,
+        'Trajectory Accuracy': f"{accuracy:.2%}",
+        'Problems with ≥1 Correct': f"{problems_with_correct}/{unique_problems}",
+        'Problem Success Rate': f"{problems_with_correct/unique_problems:.2%}" if unique_problems > 0 else "N/A",
         'Avg Steps': f"{avg_steps:.2f}",
         'Avg Steps (Correct)': f"{np.mean(correct_steps):.2f}" if correct_steps else "N/A",
         'Avg Steps (Incorrect)': f"{np.mean(incorrect_steps):.2f}" if incorrect_steps else "N/A",
@@ -65,23 +88,30 @@ def entropy_analysis(results: List[Dict[str, Any]]) -> Dict[str, pd.DataFrame]:
     Returns:
         Dictionary of analysis DataFrames
     """
-    # Collect entropy data
+    # Collect entropy data from all trajectories
     entropy_data = []
 
-    for result in results:
-        is_correct = result.get('is_correct', False)
+    for problem in results:
+        for traj in problem.get('trajectories', []):
+            is_correct = traj.get('is_correct', False)
 
-        for step in result['steps']:
-            entropy_data.append({
-                'problem_id': result['problem_id'],
-                'is_correct': is_correct,
-                'step_number': step['step_number'],
-                'avg_entropy': step['avg_entropy'],
-                'max_entropy': step['max_entropy'],
-                'min_entropy': step['min_entropy'],
-                'median_entropy': step['median_entropy'],
-                'std_entropy': step['std_entropy'],
-            })
+            for step in traj.get('steps', []):
+                entropy_data.append({
+                    'problem_id': problem['problem_id'],
+                    'is_correct': is_correct,
+                    'step_number': step['step_number'],
+                    'avg_entropy': step['avg_entropy'],
+                    'max_entropy': step['max_entropy'],
+                    'min_entropy': step['min_entropy'],
+                    'median_entropy': step['median_entropy'],
+                    'std_entropy': step['std_entropy'],
+                })
+
+    if not entropy_data:
+        return {
+            'full_data': pd.DataFrame(),
+            'summary': pd.DataFrame({'Error': ['No entropy data found']}),
+        }
 
     df = pd.DataFrame(entropy_data)
 
@@ -91,18 +121,18 @@ def entropy_analysis(results: List[Dict[str, Any]]) -> Dict[str, pd.DataFrame]:
 
     entropy_stats = pd.DataFrame({
         'Correct': [
-            correct_entropy.mean(),
-            correct_entropy.median(),
-            correct_entropy.std(),
-            correct_entropy.max(),
-            correct_entropy.min(),
+            correct_entropy.mean() if len(correct_entropy) > 0 else 0,
+            correct_entropy.median() if len(correct_entropy) > 0 else 0,
+            correct_entropy.std() if len(correct_entropy) > 0 else 0,
+            correct_entropy.max() if len(correct_entropy) > 0 else 0,
+            correct_entropy.min() if len(correct_entropy) > 0 else 0,
         ],
         'Incorrect': [
-            incorrect_entropy.mean(),
-            incorrect_entropy.median(),
-            incorrect_entropy.std(),
-            incorrect_entropy.max(),
-            incorrect_entropy.min(),
+            incorrect_entropy.mean() if len(incorrect_entropy) > 0 else 0,
+            incorrect_entropy.median() if len(incorrect_entropy) > 0 else 0,
+            incorrect_entropy.std() if len(incorrect_entropy) > 0 else 0,
+            incorrect_entropy.max() if len(incorrect_entropy) > 0 else 0,
+            incorrect_entropy.min() if len(incorrect_entropy) > 0 else 0,
         ]
     }, index=['Mean', 'Median', 'Std', 'Max', 'Min'])
 
@@ -122,22 +152,32 @@ def injection_prompt_analysis(results: List[Dict[str, Any]]) -> Dict[str, Any]:
     analyses = {}
 
     for prompt_name in INJECTION_PROMPTS.keys():
-        # Collect injection entropy data
+        # Collect injection entropy data from all trajectories
         injection_data = []
 
-        for result in results:
-            is_correct = result.get('is_correct', False)
+        for problem in results:
+            for traj in problem.get('trajectories', []):
+                is_correct = traj.get('is_correct', False)
 
-            for step in result['steps']:
-                if prompt_name in step['injection_results']:
-                    inj_result = step['injection_results'][prompt_name]
-                    injection_data.append({
-                        'problem_id': result['problem_id'],
-                        'is_correct': is_correct,
-                        'step_number': step['step_number'],
-                        'injection_entropy': inj_result['entropy'],
-                        'predicted_value': inj_result['predicted_value'],
-                    })
+                for step in traj.get('steps', []):
+                    if prompt_name in step.get('injection_results', {}):
+                        inj_result = step['injection_results'][prompt_name]
+                        injection_data.append({
+                            'problem_id': problem['problem_id'],
+                            'is_correct': is_correct,
+                            'step_number': step['step_number'],
+                            'injection_entropy': inj_result['entropy'],
+                            'predicted_value': inj_result['predicted_value'],
+                        })
+
+        if not injection_data:
+            analyses[prompt_name] = {
+                'data': pd.DataFrame(),
+                'avg_entropy_correct': 0,
+                'avg_entropy_incorrect': 0,
+                'entropy_difference': 0,
+            }
+            continue
 
         df = pd.DataFrame(injection_data)
 
@@ -168,27 +208,31 @@ def calibration_analysis(results: List[Dict[str, Any]], prompt_name: str = 'conf
     """
     calibration_data = {}
 
-    for result in results:
-        is_correct = result.get('is_correct', False)
+    for problem in results:
+        for traj in problem.get('trajectories', []):
+            is_correct = traj.get('is_correct', False)
 
-        for step in result['steps']:
-            if prompt_name in step['injection_results']:
-                pred_value = step['injection_results'][prompt_name]['predicted_value']
+            for step in traj.get('steps', []):
+                if prompt_name in step.get('injection_results', {}):
+                    pred_value = step['injection_results'][prompt_name]['predicted_value']
 
-                # Try to parse as numeric
-                try:
-                    # Extract first number from string
-                    import re
-                    numbers = re.findall(r'\d+', pred_value)
-                    if numbers:
-                        pred_value = numbers[0]
-                except:
-                    pass
+                    # Try to parse as numeric
+                    try:
+                        # Extract first number from string
+                        import re
+                        numbers = re.findall(r'\d+', pred_value)
+                        if numbers:
+                            pred_value = numbers[0]
+                    except:
+                        pass
 
-                if pred_value not in calibration_data:
-                    calibration_data[pred_value] = []
+                    if pred_value not in calibration_data:
+                        calibration_data[pred_value] = []
 
-                calibration_data[pred_value].append(is_correct)
+                    calibration_data[pred_value].append(is_correct)
+
+    if not calibration_data:
+        return pd.DataFrame({'Error': ['No calibration data found']})
 
     # Calculate accuracy for each predicted value
     calibration_results = []
@@ -224,13 +268,18 @@ def create_visualizations(results: List[Dict[str, Any]], output_dir: str = "resu
 
     # 1. Entropy distribution: Correct vs Incorrect
     entropy_data = []
-    for result in results:
-        is_correct = result.get('is_correct', False)
-        for step in result['steps']:
-            entropy_data.append({
-                'Correctness': 'Correct' if is_correct else 'Incorrect',
-                'Average Entropy': step['avg_entropy'],
-            })
+    for problem in results:
+        for traj in problem.get('trajectories', []):
+            is_correct = traj.get('is_correct', False)
+            for step in traj.get('steps', []):
+                entropy_data.append({
+                    'Correctness': 'Correct' if is_correct else 'Incorrect',
+                    'Average Entropy': step['avg_entropy'],
+                })
+
+    if not entropy_data:
+        print("No entropy data found, skipping visualizations")
+        return
 
     df = pd.DataFrame(entropy_data)
 
@@ -268,14 +317,15 @@ def create_visualizations(results: List[Dict[str, Any]], output_dir: str = "resu
 
     # 3. Entropy evolution across steps
     step_entropy_data = []
-    for result in results:
-        is_correct = result.get('is_correct', False)
-        for step in result['steps']:
-            step_entropy_data.append({
-                'Step Number': step['step_number'],
-                'Average Entropy': step['avg_entropy'],
-                'Correctness': 'Correct' if is_correct else 'Incorrect',
-            })
+    for problem in results:
+        for traj in problem.get('trajectories', []):
+            is_correct = traj.get('is_correct', False)
+            for step in traj.get('steps', []):
+                step_entropy_data.append({
+                    'Step Number': step['step_number'],
+                    'Average Entropy': step['avg_entropy'],
+                    'Correctness': 'Correct' if is_correct else 'Incorrect',
+                })
 
     df_steps = pd.DataFrame(step_entropy_data)
 

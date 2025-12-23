@@ -3,7 +3,22 @@ Entropy calculation utilities for analyzing model uncertainty.
 """
 
 import numpy as np
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Union
+
+
+def _extract_logprob_value(logprob: Union[float, Any]) -> float:
+    """
+    Extract logprob value from vLLM Logprob object or float.
+
+    Args:
+        logprob: Either a float or vLLM Logprob object
+
+    Returns:
+        Float logprob value
+    """
+    if hasattr(logprob, 'logprob'):
+        return float(logprob.logprob)
+    return float(logprob)
 
 
 def calculate_entropy(token_logprobs_dict: Dict[int, float]) -> float:
@@ -20,7 +35,7 @@ def calculate_entropy(token_logprobs_dict: Dict[int, float]) -> float:
         return 0.0
 
     # Convert logprobs to probabilities
-    logprobs = np.array(list(token_logprobs_dict.values()))
+    logprobs = np.array([_extract_logprob_value(lp) for lp in token_logprobs_dict.values()])
     probs = np.exp(logprobs)
 
     # Normalize (since we only have top-k)
@@ -90,7 +105,7 @@ def extract_top_k_probs(token_logprobs_dict: Dict[int, float]) -> Dict[str, floa
         return {}
 
     # Convert to probabilities
-    items = [(tid, np.exp(lp)) for tid, lp in token_logprobs_dict.items()]
+    items = [(tid, np.exp(_extract_logprob_value(lp))) for tid, lp in token_logprobs_dict.items()]
 
     # Normalize
     total_prob = sum(p for _, p in items)
