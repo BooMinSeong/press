@@ -54,3 +54,15 @@ Thumbs.db
 # Experiment data
 data/*
 !data/.gitkeep
+
+# claude cache
+.claude/.*
+
+# logs
+logs/
+*.out
+*.err
+*.log
+
+# slurm files
+*.slurm
