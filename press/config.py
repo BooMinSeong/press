@@ -82,3 +82,9 @@ DATASET_SPLIT = "test"
 # Experiment settings
 MAX_STEPS = 10  # Maximum reasoning steps per problem
 BATCH_SIZE = 1  # Process one problem at a time for detailed tracking
+
+# Beam search settings
+BEAM_WIDTH = 4  # Number of beams to maintain during search
+BEAM_CANDIDATES_PER_BEAM = 4  # Number of candidates to sample from each beam
+BEAM_SELECTION_INJECTION = "step_quality"  # Injection prompt to use for beam selection
+BEAM_SELECTION_METHOD = "last"  # How to aggregate entropy for beam selection: "avg" or "last"
