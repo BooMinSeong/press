@@ -24,7 +24,7 @@ def evaluate_result(data: dict) -> bool:
         return False
 
     # Parse prediction (final_answer is a string from inference.py)
-    prediction = data["final_answer"]
+    prediction = "\\boxed{" + data["final_answer"] + "}" # Wrap in boxed for parsing
     if prediction:
         pred_result = parse(prediction)
         if isinstance(pred_result, list) and len(pred_result) > 0:
