@@ -256,6 +256,20 @@ def analyze_all_problems(data: List[Dict[str, Any]],
     return pd.DataFrame(results)
 
 
+def categorize_pass_rate(pass_rate: float) -> str:
+    """Categorize pass rate into difficulty bins."""
+    if pass_rate == 0:
+        return "0% (All Incorrect)"
+    elif pass_rate < 0.25:
+        return "1-24% (Very Hard)"
+    elif pass_rate < 0.5:
+        return "25-49% (Hard)"
+    elif pass_rate < 0.75:
+        return "50-74% (Medium)"
+    else:
+        return "75-100% (Easy)"
+
+
 def print_summary(df: pd.DataFrame):
     """Print summary statistics."""
     print("=" * 80)
@@ -277,15 +291,75 @@ def print_summary(df: pd.DataFrame):
     print(f"  Max: {df['pass_rate'].max():.2%}")
     print()
 
-    # Entropy comparison for mixed problems
+    # Categorize by difficulty (pass rate)
+    df['difficulty_category'] = df['pass_rate'].apply(categorize_pass_rate)
+
+    print("=" * 80)
+    print("PROBLEM DISTRIBUTION BY DIFFICULTY (Pass Rate)")
+    print("=" * 80)
+    print()
+
+    category_counts = df['difficulty_category'].value_counts().sort_index()
+    for category, count in category_counts.items():
+        print(f"  {category}: {count} problems")
+    print()
+
+    # Analyze by difficulty category
+    print("=" * 80)
+    print("ENTROPY ANALYSIS BY PROBLEM DIFFICULTY")
+    print("=" * 80)
+    print()
+
+    # Only analyze mixed problems (with both correct and incorrect)
     mixed_df = df[df['status'] == 'mixed'].copy()
     if len(mixed_df) > 0:
-        print("=" * 80)
-        print("ENTROPY COMPARISON (Mixed Problems Only)")
-        print("=" * 80)
+        mixed_df['difficulty_category'] = mixed_df['pass_rate'].apply(categorize_pass_rate)
+
+        print(f"Analyzing {len(mixed_df)} problems with both correct and incorrect trajectories")
         print()
 
-        print(f"Number of problems with both correct and incorrect: {len(mixed_df)}")
+        for category in sorted(mixed_df['difficulty_category'].unique()):
+            category_df = mixed_df[mixed_df['difficulty_category'] == category]
+            if len(category_df) == 0:
+                continue
+
+            print(f"{category}:")
+            print("-" * 60)
+            print(f"  Number of problems: {len(category_df)}")
+
+            # Correct trajectories
+            correct_means = category_df['correct_entropy_mean'].dropna()
+            if len(correct_means) > 0:
+                print(f"  Correct trajectories entropy:")
+                print(f"    Mean: {correct_means.mean():.4f} ± {correct_means.std():.4f}")
+                print(f"    Median: {category_df['correct_entropy_median'].median():.4f}")
+                print(f"    Range: [{correct_means.min():.4f}, {correct_means.max():.4f}]")
+
+            # Incorrect trajectories
+            incorrect_means = category_df['incorrect_entropy_mean'].dropna()
+            if len(incorrect_means) > 0:
+                print(f"  Incorrect trajectories entropy:")
+                print(f"    Mean: {incorrect_means.mean():.4f} ± {incorrect_means.std():.4f}")
+                print(f"    Median: {category_df['incorrect_entropy_median'].median():.4f}")
+                print(f"    Range: [{incorrect_means.min():.4f}, {incorrect_means.max():.4f}]")
+
+            # Difference
+            if len(correct_means) > 0 and len(incorrect_means) > 0:
+                diff = incorrect_means.mean() - correct_means.mean()
+                print(f"  Entropy difference (Incorrect - Correct): {diff:+.4f}")
+
+                # Cohen's d for this category
+                cohens_d_vals = category_df['cohens_d'].dropna()
+                if len(cohens_d_vals) > 0:
+                    print(f"  Average Cohen's d: {cohens_d_vals.mean():.4f}")
+
+            print()
+
+    # Overall comparison across all mixed problems
+    if len(mixed_df) > 0:
+        print("=" * 80)
+        print("OVERALL ENTROPY COMPARISON (All Mixed Problems)")
+        print("=" * 80)
         print()
 
         # Average token entropy
@@ -302,7 +376,7 @@ def print_summary(df: pd.DataFrame):
 
         # Difference
         mean_diff = mixed_df['incorrect_entropy_mean'].mean() - mixed_df['correct_entropy_mean'].mean()
-        print(f"  Difference (Incorrect - Correct): {mean_diff:.4f}")
+        print(f"  Difference (Incorrect - Correct): {mean_diff:+.4f}")
         print(f"    {'Incorrect has HIGHER entropy (expected)' if mean_diff > 0 else 'Incorrect has LOWER entropy (unexpected)'}")
         print()
 
@@ -340,6 +414,9 @@ def create_visualizations(df: pd.DataFrame, output_dir: str = "results/correctne
     print("=" * 80)
     print()
 
+    # Add difficulty category
+    df['difficulty_category'] = df['pass_rate'].apply(categorize_pass_rate)
+
     # 1. Pass rate distribution
     print("  - Pass rate distribution")
     fig, ax = plt.subplots(figsize=(10, 6))
@@ -353,112 +430,178 @@ def create_visualizations(df: pd.DataFrame, output_dir: str = "results/correctne
     plt.savefig(output_path / 'pass_rate_distribution.png', dpi=300, bbox_inches='tight')
     plt.close()
 
-    # 2. Entropy comparison for mixed problems
+    # 2. Entropy comparison by difficulty for mixed problems
     mixed_df = df[df['status'] == 'mixed'].copy()
     if len(mixed_df) > 0:
-        print("  - Entropy comparison (correct vs incorrect)")
+        print("  - Entropy by difficulty and correctness")
 
-        # Prepare data for box plot
+        mixed_df['difficulty_category'] = mixed_df['pass_rate'].apply(categorize_pass_rate)
+
+        # Prepare data for grouped box plot
         entropy_data = []
         for _, row in mixed_df.iterrows():
+            # Add correct trajectory entropy
             entropy_data.append({
                 'Problem': row['problem_id'],
+                'Difficulty': row['difficulty_category'],
+                'Pass Rate': row['pass_rate'],
                 'Correctness': 'Correct',
-                'Entropy (Mean)': row['correct_entropy_mean'],
-                'Entropy (Median)': row['correct_entropy_median']
+                'Mean Entropy': row['correct_entropy_mean'],
+                'Median Entropy': row['correct_entropy_median']
             })
+            # Add incorrect trajectory entropy
             entropy_data.append({
                 'Problem': row['problem_id'],
+                'Difficulty': row['difficulty_category'],
+                'Pass Rate': row['pass_rate'],
                 'Correctness': 'Incorrect',
-                'Entropy (Mean)': row['incorrect_entropy_mean'],
-                'Entropy (Median)': row['incorrect_entropy_median']
+                'Mean Entropy': row['incorrect_entropy_mean'],
+                'Median Entropy': row['incorrect_entropy_median']
             })
 
         plot_df = pd.DataFrame(entropy_data)
 
-        fig, axes = plt.subplots(1, 2, figsize=(14, 6))
-
-        # Mean entropy
-        sns.boxplot(data=plot_df, x='Correctness', y='Entropy (Mean)', ax=axes[0], palette='Set2')
-        sns.stripplot(data=plot_df, x='Correctness', y='Entropy (Mean)', ax=axes[0],
-                     color='black', alpha=0.5, size=4)
-        axes[0].set_title('Mean Entropy: Correct vs Incorrect')
-        axes[0].set_ylabel('Mean Entropy per Trajectory')
-
-        # Median entropy
-        sns.boxplot(data=plot_df, x='Correctness', y='Entropy (Median)', ax=axes[1], palette='Set2')
-        sns.stripplot(data=plot_df, x='Correctness', y='Entropy (Median)', ax=axes[1],
-                     color='black', alpha=0.5, size=4)
-        axes[1].set_title('Median Entropy: Correct vs Incorrect')
-        axes[1].set_ylabel('Median Entropy per Trajectory')
-
-        plt.suptitle('Entropy Comparison: Correct vs Incorrect Trajectories', fontsize=14)
+        # 2a. Grouped box plot by difficulty
+        fig, ax = plt.subplots(figsize=(14, 6))
+        sns.boxplot(data=plot_df, x='Difficulty', y='Mean Entropy', hue='Correctness',
+                   ax=ax, palette='Set2')
+        sns.stripplot(data=plot_df, x='Difficulty', y='Mean Entropy', hue='Correctness',
+                     ax=ax, dodge=True, color='black', alpha=0.4, size=3, legend=False)
+        ax.set_title('Mean Entropy by Problem Difficulty and Correctness', fontsize=14)
+        ax.set_ylabel('Mean Entropy per Trajectory')
+        ax.set_xlabel('Problem Difficulty (Pass Rate)')
+        plt.xticks(rotation=15, ha='right')
+        plt.legend(title='Trajectory Type', loc='best')
         plt.tight_layout()
-        plt.savefig(output_path / 'entropy_comparison.png', dpi=300, bbox_inches='tight')
+        plt.savefig(output_path / 'entropy_by_difficulty.png', dpi=300, bbox_inches='tight')
         plt.close()
 
-        # 3. Entropy vs pass rate
-        print("  - Entropy vs pass rate")
+        # 3. Entropy vs pass rate (scatter plot with both correct and incorrect)
+        print("  - Entropy vs pass rate (combined)")
 
-        fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+        fig, ax = plt.subplots(figsize=(12, 7))
 
-        # Correct entropy vs pass rate
-        if 'correct_entropy_mean' in mixed_df.columns:
-            axes[0].scatter(mixed_df['pass_rate'], mixed_df['correct_entropy_mean'],
-                          alpha=0.6, s=100, color='green')
-            axes[0].set_xlabel('Pass Rate')
-            axes[0].set_ylabel('Mean Entropy (Correct Trajectories)')
-            axes[0].set_title('Correct Trajectory Entropy vs Problem Difficulty')
+        # Plot both correct and incorrect on same plot
+        ax.scatter(mixed_df['pass_rate'], mixed_df['correct_entropy_mean'],
+                  alpha=0.7, s=150, color='green', marker='o', label='Correct Trajectories',
+                  edgecolors='black', linewidth=1.5)
+        ax.scatter(mixed_df['pass_rate'], mixed_df['incorrect_entropy_mean'],
+                  alpha=0.7, s=150, color='red', marker='s', label='Incorrect Trajectories',
+                  edgecolors='black', linewidth=1.5)
 
-            # Add trend line
-            z = np.polyfit(mixed_df['pass_rate'], mixed_df['correct_entropy_mean'], 1)
-            p = np.poly1d(z)
-            axes[0].plot(mixed_df['pass_rate'], p(mixed_df['pass_rate']),
-                        "r--", alpha=0.5, label=f'Trend: y={z[0]:.2f}x+{z[1]:.2f}')
-            axes[0].legend()
+        # Add connecting lines for each problem
+        for _, row in mixed_df.iterrows():
+            ax.plot([row['pass_rate'], row['pass_rate']],
+                   [row['correct_entropy_mean'], row['incorrect_entropy_mean']],
+                   'k-', alpha=0.3, linewidth=1)
 
-        # Incorrect entropy vs pass rate
-        if 'incorrect_entropy_mean' in mixed_df.columns:
-            axes[1].scatter(mixed_df['pass_rate'], mixed_df['incorrect_entropy_mean'],
-                          alpha=0.6, s=100, color='red')
-            axes[1].set_xlabel('Pass Rate')
-            axes[1].set_ylabel('Mean Entropy (Incorrect Trajectories)')
-            axes[1].set_title('Incorrect Trajectory Entropy vs Problem Difficulty')
+        # Add trend lines
+        if len(mixed_df) > 1:
+            z_correct = np.polyfit(mixed_df['pass_rate'], mixed_df['correct_entropy_mean'], 1)
+            p_correct = np.poly1d(z_correct)
+            x_range = np.linspace(mixed_df['pass_rate'].min(), mixed_df['pass_rate'].max(), 100)
+            ax.plot(x_range, p_correct(x_range),
+                   "g--", alpha=0.6, linewidth=2, label=f'Correct trend: y={z_correct[0]:.3f}x+{z_correct[1]:.3f}')
 
-            # Add trend line
-            z = np.polyfit(mixed_df['pass_rate'], mixed_df['incorrect_entropy_mean'], 1)
-            p = np.poly1d(z)
-            axes[1].plot(mixed_df['pass_rate'], p(mixed_df['pass_rate']),
-                        "r--", alpha=0.5, label=f'Trend: y={z[0]:.2f}x+{z[1]:.2f}')
-            axes[1].legend()
+            z_incorrect = np.polyfit(mixed_df['pass_rate'], mixed_df['incorrect_entropy_mean'], 1)
+            p_incorrect = np.poly1d(z_incorrect)
+            ax.plot(x_range, p_incorrect(x_range),
+                   "r--", alpha=0.6, linewidth=2, label=f'Incorrect trend: y={z_incorrect[0]:.3f}x+{z_incorrect[1]:.3f}')
 
-        plt.suptitle('Entropy vs Problem Difficulty (Pass Rate as Proxy)', fontsize=14)
+        ax.set_xlabel('Pass Rate (Problem Difficulty)', fontsize=12)
+        ax.set_ylabel('Mean Entropy', fontsize=12)
+        ax.set_title('Entropy vs Problem Difficulty: Correct vs Incorrect Trajectories', fontsize=14)
+        ax.legend(loc='best', fontsize=10)
+        ax.grid(alpha=0.3)
         plt.tight_layout()
-        plt.savefig(output_path / 'entropy_vs_difficulty.png', dpi=300, bbox_inches='tight')
+        plt.savefig(output_path / 'entropy_vs_pass_rate.png', dpi=300, bbox_inches='tight')
         plt.close()
 
-        # 4. Effect size by problem
+        # 4. Entropy difference vs pass rate
+        print("  - Entropy difference vs pass rate")
+
+        # Calculate entropy difference for each problem
+        mixed_df['entropy_diff'] = mixed_df['incorrect_entropy_mean'] - mixed_df['correct_entropy_mean']
+
+        fig, ax = plt.subplots(figsize=(12, 7))
+
+        # Scatter plot with color based on pass rate
+        scatter = ax.scatter(mixed_df['pass_rate'], mixed_df['entropy_diff'],
+                           c=mixed_df['pass_rate'], cmap='RdYlGn',
+                           s=200, alpha=0.7, edgecolors='black', linewidth=1.5)
+
+        # Add colorbar
+        cbar = plt.colorbar(scatter, ax=ax)
+        cbar.set_label('Pass Rate', fontsize=11)
+
+        # Add horizontal line at 0
+        ax.axhline(y=0, color='black', linestyle='-', linewidth=1, alpha=0.5)
+
+        # Add trend line
+        if len(mixed_df) > 1:
+            z = np.polyfit(mixed_df['pass_rate'], mixed_df['entropy_diff'], 1)
+            p = np.poly1d(z)
+            x_range = np.linspace(mixed_df['pass_rate'].min(), mixed_df['pass_rate'].max(), 100)
+            ax.plot(x_range, p(x_range),
+                   "b--", alpha=0.6, linewidth=2, label=f'Trend: y={z[0]:.3f}x+{z[1]:.3f}')
+
+        # Add problem labels
+        for _, row in mixed_df.iterrows():
+            ax.annotate(row['problem_id'],
+                       (row['pass_rate'], row['entropy_diff']),
+                       textcoords="offset points", xytext=(0,10),
+                       ha='center', fontsize=8, alpha=0.7)
+
+        ax.set_xlabel('Pass Rate (Easy → Hard ←)', fontsize=12)
+        ax.set_ylabel('Entropy Difference (Incorrect - Correct)', fontsize=12)
+        ax.set_title('Entropy Difference vs Problem Difficulty\n(Positive = Incorrect has higher entropy)', fontsize=14)
+        ax.legend(loc='best', fontsize=10)
+        ax.grid(alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(output_path / 'entropy_diff_vs_pass_rate.png', dpi=300, bbox_inches='tight')
+        plt.close()
+
+        # 5. Effect size by problem and pass rate
         if 'cohens_d' in mixed_df.columns:
             print("  - Effect size by problem")
 
-            fig, ax = plt.subplots(figsize=(12, 6))
+            fig, axes = plt.subplots(1, 2, figsize=(16, 6))
 
+            # 5a. Effect size by problem (sorted)
             sorted_mixed = mixed_df.sort_values('cohens_d')
             colors = ['red' if d < 0 else 'green' for d in sorted_mixed['cohens_d']]
 
-            ax.barh(range(len(sorted_mixed)), sorted_mixed['cohens_d'], color=colors, alpha=0.7)
-            ax.set_yticks(range(len(sorted_mixed)))
-            ax.set_yticklabels(sorted_mixed['problem_id'])
-            ax.set_xlabel("Cohen's d (Correct - Incorrect)")
-            ax.set_title("Effect Size by Problem\n(Negative = Incorrect has higher entropy)")
-            ax.axvline(x=0, color='black', linestyle='-', linewidth=0.5)
-            ax.axvline(x=-0.2, color='gray', linestyle='--', linewidth=0.5, alpha=0.5)
-            ax.axvline(x=-0.5, color='gray', linestyle='--', linewidth=0.5, alpha=0.5)
-            ax.axvline(x=-0.8, color='gray', linestyle='--', linewidth=0.5, alpha=0.5)
-            ax.grid(axis='x', alpha=0.3)
+            axes[0].barh(range(len(sorted_mixed)), sorted_mixed['cohens_d'], color=colors, alpha=0.7)
+            axes[0].set_yticks(range(len(sorted_mixed)))
+            axes[0].set_yticklabels(sorted_mixed['problem_id'])
+            axes[0].set_xlabel("Cohen's d (Correct - Incorrect)")
+            axes[0].set_title("Effect Size by Problem\n(Negative = Incorrect has higher entropy)")
+            axes[0].axvline(x=0, color='black', linestyle='-', linewidth=1)
+            axes[0].axvline(x=-0.2, color='gray', linestyle='--', linewidth=0.5, alpha=0.5)
+            axes[0].axvline(x=-0.5, color='gray', linestyle='--', linewidth=0.5, alpha=0.5)
+            axes[0].axvline(x=-0.8, color='gray', linestyle='--', linewidth=0.5, alpha=0.5)
+            axes[0].grid(axis='x', alpha=0.3)
+
+            # 5b. Effect size vs pass rate
+            axes[1].scatter(mixed_df['pass_rate'], mixed_df['cohens_d'],
+                          s=150, alpha=0.7, edgecolors='black', linewidth=1.5)
+            axes[1].axhline(y=0, color='black', linestyle='-', linewidth=1, alpha=0.5)
+            axes[1].set_xlabel('Pass Rate')
+            axes[1].set_ylabel("Cohen's d (Correct - Incorrect)")
+            axes[1].set_title("Effect Size vs Problem Difficulty")
+            axes[1].grid(alpha=0.3)
+
+            # Add trend line
+            if len(mixed_df) > 1:
+                z = np.polyfit(mixed_df['pass_rate'], mixed_df['cohens_d'], 1)
+                p = np.poly1d(z)
+                x_range = np.linspace(mixed_df['pass_rate'].min(), mixed_df['pass_rate'].max(), 100)
+                axes[1].plot(x_range, p(x_range),
+                           "r--", alpha=0.6, linewidth=2, label=f'Trend: y={z[0]:.3f}x+{z[1]:.3f}')
+                axes[1].legend()
 
             plt.tight_layout()
-            plt.savefig(output_path / 'effect_size_by_problem.png', dpi=300, bbox_inches='tight')
+            plt.savefig(output_path / 'effect_size_analysis.png', dpi=300, bbox_inches='tight')
             plt.close()
 
     print()
