@@ -12,6 +12,7 @@ import argparse
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Any
+from tqdm import tqdm
 
 import sys
 sys.path.append(str(Path(__file__).parent.parent))
@@ -44,7 +45,7 @@ def evaluate_beam_search_results(
     """
     evaluated_results = []
 
-    for result in results:
+    for result in tqdm(results, desc="Evaluating beams"):
         # Evaluate each beam
         for beam_idx, beam in enumerate(result['beams']):
             eval_data = {
@@ -87,7 +88,7 @@ def evaluate_trajectory_results(
     """
     evaluated_results = []
 
-    for result in results:
+    for result in tqdm(results, desc="Evaluating trajectories"):
         for trajectory in result['trajectories']:
             eval_data = {
                 'gold_answer': result['gold_answer'],
