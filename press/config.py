@@ -65,6 +65,7 @@ def get_sampling_params(temperature=0.7, max_tokens=512, stop_sequences=None):
         temperature=temperature,
         max_tokens=max_tokens,
         stop=stop_sequences,
+        include_stop_str_in_output=True,
         logprobs=5,  # Return top-5 logprobs
     )
 
