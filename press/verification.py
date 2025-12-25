@@ -23,6 +23,10 @@ def evaluate_result(data: dict) -> bool:
     else:
         return False
 
+    # Check if final_answer exists
+    if data["final_answer"] is None or data["final_answer"] == "":
+        return False
+
     # Parse prediction (final_answer is a string from inference.py)
     prediction = "\\boxed{" + data["final_answer"] + "}" # Wrap in boxed for parsing
     if prediction:
