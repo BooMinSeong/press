@@ -5,7 +5,7 @@ Configuration for system prompts, injection prompts, and model parameters.
 from vllm import SamplingParams
 
 # Model configuration
-MODEL_NAME = "Qwen/Qwen2.5-1.5B-Instruct"
+MODEL_NAME = "Qwen/Qwen2.5-7B-Instruct"
 
 # System prompt for math problem solving
 SYSTEM_PROMPT = """Solve the following math problem efficiently and clearly:
